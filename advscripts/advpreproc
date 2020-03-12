@@ -71,6 +71,10 @@ mrconvert rawdataPAdnstr.mif  rawdataPAdn.mif -strides +1,2,3,4 -force -nthreads
 rm rawdataAPdnstr.mif
 rm rawdataPAdnstr.mif 
 
+rsync -vazu ${WORKDIR}/acqparams.txt .
+rsync -vazu ${WORKDIR}/index.txt .
+mrconvert rawdataAPdn.mif rawdataAPdn.nii -export_grad_fsl bvecs bvals -force -nthreads $ncpus
+
 #Generate a b0 base image for each phase-encoding direction
 
 mrconvert rawdataAPdn.mif b0AP.mif -coord 3 0 -force -nthreads $ncpus
@@ -80,23 +84,30 @@ mrconvert rawdataPAdn.mif b0PA.mif -coord 3 0 -force -nthreads $ncpus
 
 dwiextract rawdataAPdn.mif APb0s.mif -bzero -force -nthreads $ncpus
 
+fslmerge -t b0APPA b0AP.nii b0PA.nii
+
+nvols=`mrinfo rawdataAPdn.mif -nthreads 0 -quiet | grep Dimensions| awk '{print $8}'`
+
+mrinfo $raw -nthreads 0 -quiet| grep SliceTiming | awk '{print $2}' > slspec.txt
+
+
 if ([ $ismultiband = 1 ]); then
 
-        mrcat APb0s.mif rawdataPAdn.mif allb0s.mif -axis 3 -force -nthreads $ncpus
-	dwipreproc -rpe_pair -se_epi allb0s.mif -align_seepi -pe_dir AP -export_grad_mrtrix adjencoding.b rawdataAPdn.mif eddycorr.mif -eddy_options " --repol --data_is_shelled --mb=2 --ol_type=both --slm=linear " -nthreads $ncpus -force -eddyqc_all dwipreproc
-
-#elif ([ $ismultiband = 1 ] && [ $fullreverseseq = 1 ]); then
-        
-	#mrcat rawdataAPdn.mif rawdataPAdn.mif allDWIs.mif -axis 3 -force -nthreads $ncpus
-	#echo "Preprocessing command...:dwipreproc -rpe_all -export_grad_mrtrix adjencoding.b -pe_dir AP allDWIs.mif eddycorr.mif -eddy_options " --repol --data_is_shelled --mb=2 --ol_type=both " -nthreads $ncpus -force -tempdir . -nocleanup"
-	#dwipreproc -rpe_all -export_grad_mrtrix adjencoding.b -pe_dir AP allDWIs.mif eddycorr.mif -eddy_options " --repol --data_is_shelled --mb=2 --ol_type=both " -nthreads $ncpus -force -tempdir . -nocleanup
+	topup --imain=b0APPA.nii.gz --datain=acqparams.txt --config=b02b0.cnf --out=topup_results --iout=topup_b0
+	fslmaths topup_b0 -Tmean topup_b01
+	bet topup_b01.nii.gz binary -m -f 0.2
+	eddy_openmp --imain=rawdataAPdn.nii --mask=binary_mask.nii.gz --acqp=acqparams.txt --index=index.txt --bvecs=bvecs --bvals=bvals --topup=topup_results --data_is_shelled --mb=2 --slm=linear --repol --out=eddycorr
 
 else
 
-	mrcat APb0s.mif rawdataPAdn.mif allb0s.mif -axis 3 -force -nthreads $ncpus
-	dwipreproc -rpe_pair -se_epi allb0s.mif -align_seepi -pe_dir AP -export_grad_mrtrix adjencoding.b rawdataAPdn.mif eddycorr.mif -eddy_options " --repol --data_is_shelled " -nthreads $ncpus -force -eddyqc_all dwipreproc
+	topup --imain=b0APPA.nii.gz --datain=acqparams.txt --config=b02b0.cnf --out=topup_results --iout=topup_b0
+	fslmaths topup_b0 -Tmean topup_b01
+	bet topup_b01.nii.gz binary -m -f 0.2
+	eddy_openmp --imain=rawdataAPdn.nii --mask=binary_mask.nii.gz --acqp=acqparams.txt --index=index.txt --bvecs=bvecs --bvals=bvals --topup=topup_results --slm=linear --repol --out=eddycorr
 
 fi
+
+mrconvert eddycorr.nii.gz eddycorr.mif -fslgrad eddycorr.eddy_rotated_bvecs bvals -nthreads $ncpus -force
 
 dwiextract eddycorr.mif -nthreads $ncpus -bzero - | mrmath -axis 3 - mean eddymeanb0.nii -force -nthreads $ncpus
 
