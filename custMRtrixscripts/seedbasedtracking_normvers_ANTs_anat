@@ -82,8 +82,8 @@ while read line
 
 do 
 
-seed=$(echo $line | cut -d " " -f 1) 
-target=$(echo $line | cut -d " " -f 2)
+seed=${line% *}
+target=${line#* }
 
 echo "tracking for $seed to $target" 
 
